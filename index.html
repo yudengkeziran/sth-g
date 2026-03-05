@@ -40,7 +40,7 @@
   .btn.primary{border-color:#ff0;background:rgba(255,200,0,.15);color:#ff0}
   .btn.primary:hover{background:rgba(255,200,0,.3);box-shadow:0 0 20px rgba(255,200,0,.5)}
   .tips{color:rgba(255,255,255,.4);font-size:12px;letter-spacing:2px;margin-top:32px;text-align:center;line-height:2}
-  .stage-announce{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-family:'Orbitron',monospace;font-size:36px;font-weight:900;letter-spacing:6px;color:#fff;text-shadow:0 0 40px #0af,0 0 80px #0af;z-index:50;pointer-events:none;opacity:0;transition:opacity .4s}
+  .stage-announce{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-family:'Orbitron',monospace;font-size:36px;font-weight:900;letter-spacing:6px;color:#fff;text-shadow:0 0 40px #0af,0 0 80px #0af;z-index:50;pointer-events:none;opacity:0;transition:opacity .4s;white-space:pre-line;text-align:center}
   .stage-announce.show{opacity:1}
   #combo-display{position:absolute;right:20px;top:50%;transform:translateY(-50%);text-align:center;pointer-events:none;opacity:0;transition:opacity .3s}
   .combo-num{font-family:'Orbitron',monospace;font-size:48px;font-weight:900;color:#ff0;text-shadow:0 0 20px #ff0,0 0 40px #fa0;line-height:1}
@@ -85,7 +85,7 @@
 <div id="overlay">
   <div class="overlay-title">THUNDER<br>STRIKE</div>
   <div class="overlay-subtitle">雷电突击 · EXTREME ASSAULT</div>
-  <div style="font-family:'Orbitron',monospace;font-size:10px;letter-spacing:3px;color:rgba(0,180,255,.4);margin-bottom:32px">v1.0.2</div>
+  <div style="font-family:'Orbitron',monospace;font-size:10px;letter-spacing:3px;color:rgba(0,180,255,.4);margin-bottom:32px">v1.0.3</div>
   <button class="btn primary" onclick="startGame()">▶ 开始战斗</button>
   <button class="btn" onclick="showControls()">操作说明</button>
   <div class="tips">
@@ -110,7 +110,7 @@ resize();
 window.addEventListener('resize', resize);
 
 // ===== GAME STATE =====
-let state = 'menu'; // menu, playing, paused, gameover, win
+let state = 'menu';
 let score = 0, lives = 3, stage = 1, wave = 0;
 let combo = 0, comboTimer = 0, maxCombo = 0;
 let frame = 0, stageTimer = 0;
@@ -133,7 +133,7 @@ const player = {
   shieldRegen:0,
   invincible:0,
   trail:[],
-  powerLevel:1, // 1-3
+  powerLevel:1,
   shootTimer:0,
   shootRate:8,
   dead:false,
@@ -146,13 +146,16 @@ let bgStars=[], bgNebula=[];
 let screenShake=0, shakeX=0, shakeY=0;
 let mouseX=W/2, mouseY=H/2;
 
+// ===== HUD throttle =====
+let hudDirty = true;
+
 // ===== INPUT =====
 document.addEventListener('mousemove',e=>{mouseX=e.clientX;mouseY=e.clientY});
 document.addEventListener('keydown',e=>{
   if(e.code==='Space'&&state==='playing'){e.preventDefault();activateSuper();}
-  if(e.key==='1')currentWeapon=0;
-  if(e.key==='2')currentWeapon=1;
-  if(e.key==='3')currentWeapon=2;
+  if(e.key==='1'){currentWeapon=0;hudDirty=true;}
+  if(e.key==='2'){currentWeapon=1;hudDirty=true;}
+  if(e.key==='3'){currentWeapon=2;hudDirty=true;}
 });
 
 // ===== INIT =====
@@ -171,18 +174,21 @@ function initBg(){
 function startGame(){
   document.getElementById('overlay').classList.add('hidden');
   state='playing';
-  score=0;lives=3;stage=1;wave=0;combo=0;superCharge=0;
-  bullets=[];enemyBullets=[];enemies=[];particles=[];pickups=[];
-  bossActive=false;bonusActive=false;boss=null;
+  score=0;lives=3;stage=1;wave=0;combo=0;maxCombo=0;superCharge=0;
+  bullets=[];enemyBullets=[];enemies=[];particles=[];pickups=[];bossBullets=[];
+  bossActive=false;bonusActive=false;boss=null;lightning=[];
   player.x=W/2;player.y=H*.75;player.tx=W/2;player.ty=H*.75;
   player.hp=player.maxHp;player.shield=player.maxShield;
   player.invincible=0;player.dead=false;player.powerLevel=1;
-  player.shootTimer=0;player.trail=[];
-  currentWeapon=0;superActive=false;
+  player.shootTimer=0;player.trail=[];player.shieldRegen=0;
+  currentWeapon=0;superActive=false;superTimer=0;
+  frame=0;stageTimer=0;
+  screenShake=0;
   initBg();
+  hudDirty=true;
+  updateHUD();
   announceStage('STAGE '+String(stage).padStart(2,'0'));
   spawnWave();
-  updateHUD();
 }
 
 function showControls(){
@@ -191,12 +197,11 @@ function showControls(){
 
 // ===== SPAWN =====
 const ENEMY_TYPES=[
-  // type, hp, spd, size, score, color, pattern, shootRate
-  {type:'scout',   hp:30,  spd:2.5, size:20, score:100, color:'#0ff', pattern:'straight',   shootRate:80},
-  {type:'fighter', hp:60,  spd:1.8, size:28, score:200, color:'#f80', pattern:'zigzag',     shootRate:60},
-  {type:'bomber',  hp:120, spd:1.2, size:38, score:400, color:'#f0f', pattern:'dive',       shootRate:45},
-  {type:'carrier', hp:200, spd:0.8, size:50, score:800, color:'#8f0', pattern:'orbit',      shootRate:100},
-  {type:'elite',   hp:300, spd:2.0, size:32, score:600, color:'#ff0', pattern:'homing',     shootRate:40},
+  {type:'scout',   hp:30,  spd:2.5, size:20, score:100, color:'#0ff', pattern:'straight', shootRate:80},
+  {type:'fighter', hp:60,  spd:1.8, size:28, score:200, color:'#f80', pattern:'zigzag',   shootRate:60},
+  {type:'bomber',  hp:120, spd:1.2, size:38, score:400, color:'#f0f', pattern:'dive',     shootRate:45},
+  {type:'carrier', hp:200, spd:0.8, size:50, score:800, color:'#8f0', pattern:'orbit',    shootRate:100},
+  {type:'elite',   hp:300, spd:2.0, size:32, score:600, color:'#ff0', pattern:'homing',   shootRate:40},
 ];
 
 function spawnWave(){
@@ -204,8 +209,8 @@ function spawnWave(){
   let count=4+wave*2+stage*2;
   let types=Math.min(wave,ENEMY_TYPES.length);
   for(let i=0;i<count;i++){
-    let t=ENEMY_TYPES[Math.floor(Math.random()*(types))];
-    let e={
+    let t=ENEMY_TYPES[Math.floor(Math.random()*types)];
+    enemies.push({
       ...t,
       x:Math.random()*(W-80)+40,
       y:-60-i*50,
@@ -221,17 +226,16 @@ function spawnWave(){
       alive:true,
       hitFlash:0,
       spawnTime:frame+i*15,
-    };
-    enemies.push(e);
+    });
   }
 }
 
 function spawnBoss(){
   bossActive=true;
   const BOSSES=[
-    {name:'PLASMA OVERLORD', hp:5000,  color:'#f50', size:80, phase:1},
-    {name:'DARK NEBULA',     hp:8000,  color:'#80f', size:95, phase:1},
-    {name:'IRON TITAN',      hp:12000, color:'#0f8', size:110,phase:1},
+    {name:'PLASMA OVERLORD', hp:5000,  color:'#f50', size:80},
+    {name:'DARK NEBULA',     hp:8000,  color:'#80f', size:95},
+    {name:'IRON TITAN',      hp:12000, color:'#0f8', size:110},
   ];
   let b=BOSSES[Math.min(stage-1,BOSSES.length-1)];
   boss={
@@ -255,7 +259,6 @@ function spawnBoss(){
 function spawnBonusStage(){
   bonusActive=true;
   enemies=[];enemyBullets=[];
-  // Lots of weak enemies raining pickups
   for(let i=0;i<30;i++){
     enemies.push({
       type:'bonus',hp:20,spd:2,size:22,score:500,color:'#ff0',
@@ -276,7 +279,6 @@ function playerShoot(){
   const w=WEAPONS[currentWeapon];
   const px=player.x, py=player.y-player.h/2;
   if(w.name==='VULCAN'){
-    // Triple stream with power
     let spread=player.powerLevel>1?[-6,0,6]:[-3,3];
     if(player.powerLevel===3) spread=[-9,-3,3,9];
     for(let s of spread){
@@ -302,10 +304,9 @@ function playerShoot(){
 function enemyShoot(e){
   if(e.type==='bonus') return;
   let dx=player.x-e.x, dy=player.y-e.y;
-  let dist=Math.sqrt(dx*dx+dy*dy);
+  let dist=Math.sqrt(dx*dx+dy*dy)||1;
   let spd=e.type==='elite'?8:5;
   let vx=(dx/dist)*spd, vy=(dy/dist)*spd;
-  // Different bullet patterns
   if(e.type==='bomber'){
     for(let i=-1;i<=1;i++){
       enemyBullets.push({x:e.x,y:e.y,vx:vx+i*.5,vy:vy+i*.2,r:4,color:'#f0f',dmg:15,life:80});
@@ -324,24 +325,20 @@ function bossShoot(){
   if(!boss||!boss.alive) return;
   const bp=boss.patternPhase;
   if(bp===0){
-    // Spread burst
     for(let i=0;i<12;i++){
       let a=(i/12)*Math.PI*2+boss.angle;
       bossBullets.push({x:boss.x,y:boss.y,vx:Math.cos(a)*5,vy:Math.sin(a)*5,r:5,color:boss.color,dmg:20,life:120,type:'normal'});
     }
   } else if(bp===1){
-    // Aimed triple
-    let dx=player.x-boss.x,dy=player.y-boss.y,d=Math.sqrt(dx*dx+dy*dy);
+    let dx=player.x-boss.x,dy=player.y-boss.y,d=Math.sqrt(dx*dx+dy*dy)||1;
     for(let i=-1;i<=1;i++){
       bossBullets.push({x:boss.x,y:boss.y,vx:(dx/d)*7+i,vy:(dy/d)*7,r:6,color:'#f80',dmg:25,life:100,type:'aimed'});
     }
   } else if(bp===2){
-    // Laser wall
     for(let i=0;i<W;i+=60){
       bossBullets.push({x:i,y:boss.y+50,vx:0,vy:3,r:8,color:'#f00',dmg:30,life:150,type:'wall'});
     }
   } else if(bp===3){
-    // Homing
     bossBullets.push({x:boss.x,y:boss.y,vx:0,vy:3,r:7,color:'#80f',dmg:20,life:200,type:'homing',target:true});
   }
 }
@@ -407,16 +404,13 @@ function rectCircle(rx,ry,rw,rh,cx,cy,cr){
   let dx=nearX-cx,dy=nearY-cy;
   return dx*dx+dy*dy<cr*cr;
 }
-function rectRect(ax,ay,aw,ah,bx,by,bw,bh){
-  return Math.abs(ax-bx)<(aw+bw)/2 && Math.abs(ay-by)<(ah+bh)/2;
-}
 
 // ===== SUPER SKILL =====
 function activateSuper(){
   if(superCharge<superMax||superActive) return;
   superActive=true;superTimer=180;superCharge=0;
+  hudDirty=true;
   announceStage('⚡ THUNDER STRIKE ⚡');
-  // Screen-clearing lightning
   for(let i=0;i<15;i++){
     setTimeout(()=>{
       enemies.forEach(e=>{
@@ -436,24 +430,27 @@ function activateSuper(){
   spawnParticles(player.x,player.y,'#ff0',50,12,true);
 }
 
+// ===== FIX: killEnemy — set alive=false FIRST to prevent multi-bullet same-frame double kill =====
 function killEnemy(e){
-  if(!e.alive) return;
-  e.alive=false;
-  score+=e.score*(combo>5?2:1);
-  combo++;comboTimer=120;
-  superCharge=Math.min(superMax,superCharge+(e.type==='bonus'?8:5));
-  // Cap explosion size to avoid particle explosion
-  let expSize=Math.min(e.size/30, 1.5);
-  spawnExplosion(e.x,e.y,e.color,expSize);
-  if(Math.random()<(e.type==='bonus'?0.8:0.25)) spawnPickup(e.x,e.y,['hp','shield','charge','power'][Math.floor(Math.random()*4)]);
-  // Don't call updateHUD here - it's called in the main loop
+  if(!e.alive) return;      // guard: already processed
+  e.alive = false;          // ← MUST be set before any score/combo logic
+  score += e.score * (combo > 5 ? 2 : 1);
+  combo++;
+  comboTimer = 120;
+  if(combo > maxCombo) maxCombo = combo;
+  superCharge = Math.min(superMax, superCharge + (e.type==='bonus' ? 8 : 5));
+  let expSize = Math.min(e.size / 30, 1.5);
+  spawnExplosion(e.x, e.y, e.color, expSize);
+  if(Math.random() < (e.type==='bonus' ? 0.8 : 0.25))
+    spawnPickup(e.x, e.y, ['hp','shield','charge','power'][Math.floor(Math.random()*4)]);
+  hudDirty = true;
 }
 
 // ===== UPDATE =====
 function update(){
   if(state!=='playing') return;
   frame++;stageTimer++;
-  // Screen shake decay
+
   screenShake*=0.85;
   shakeX=(Math.random()-.5)*screenShake;
   shakeY=(Math.random()-.5)*screenShake;
@@ -473,6 +470,7 @@ function update(){
   player.shieldRegen++;
   if(player.shieldRegen>120 && player.shield<player.maxShield){
     player.shield=Math.min(player.maxShield,player.shield+0.2);
+    hudDirty=true;
   }
 
   // Player shoot
@@ -494,31 +492,31 @@ function update(){
   if(player.invincible>0) player.invincible--;
 
   // Combo decay
-  if(comboTimer>0){comboTimer--;if(comboTimer===0){combo=0;}}
+  if(comboTimer>0){comboTimer--;if(comboTimer===0){combo=0;hudDirty=true;}}
   updateComboDisplay();
 
-  // Update bullets
+  // Update player bullets — check enemies AFTER alive flag is reliable
   bullets=bullets.filter(b=>{
     b.x+=b.vx;b.y+=b.vy;b.life--;
     b.trail.push({x:b.x,y:b.y});
     if(b.trail.length>6) b.trail.shift();
     if(b.x<-20||b.x>W+20||b.y<-20||b.y>H+20||b.life<=0) return false;
-    // Hit enemies
     let hit=false;
     for(let ei=0;ei<enemies.length;ei++){
       let e=enemies[ei];
-      if(!e.alive) continue;
+      if(!e.alive) continue;               // skip already-dead enemies
       if(frame<e.spawnTime) continue;
       if(rectCircle(e.x,e.y,e.size,e.size,b.x,b.y,b.w||5)){
-        e.hp-=b.dmg;e.hitFlash=5;
+        e.hp-=b.dmg;
+        e.hitFlash=5;
         spawnParticles(b.x,b.y,b.color,4,3);
         if(b.type==='laser') spawnLightning(b.x,b.y,e.x,e.y,b.color,1);
-        if(e.hp<=0) killEnemy(e);
+        if(e.hp<=0) killEnemy(e);  // killEnemy sets alive=false immediately
         hit=true;
-        break; // one bullet hits one enemy
+        break;
       }
     }
-    if(boss&&boss.alive){
+    if(!hit && boss&&boss.alive){
       if(rectCircle(boss.x,boss.y,boss.size,boss.size,b.x,b.y,b.w||5)){
         boss.hp-=b.dmg;boss.hitFlash=5;
         spawnParticles(b.x,b.y,b.color,4,3);
@@ -545,7 +543,7 @@ function update(){
   // Boss bullets
   bossBullets=bossBullets.filter(b=>{
     if(b.type==='homing'){
-      let dx=player.x-b.x,dy=player.y-b.y,d=Math.sqrt(dx*dx+dy*dy);
+      let dx=player.x-b.x,dy=player.y-b.y,d=Math.sqrt(dx*dx+dy*dy)||1;
       b.vx+=(dx/d)*.3;b.vy+=(dy/d)*.3;
       let spd=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
       if(spd>7){b.vx*=7/spd;b.vy*=7/spd;}
@@ -569,7 +567,6 @@ function update(){
     e.angle+=.03;
     e.phase+=.02;
     e.hitFlash=Math.max(0,e.hitFlash-1);
-    // Movement patterns
     if(e.pattern==='straight'){
       e.x+=e.vx;e.y+=e.vy;
       if(e.x<e.size||e.x>W-e.size) e.vx*=-1;
@@ -579,7 +576,7 @@ function update(){
       if(e.x<e.size||e.x>W-e.size) e.vx*=-1;
     } else if(e.pattern==='dive'){
       let tx=player.x, ty=player.y;
-      let dx=tx-e.x, dy=ty-e.y, d=Math.sqrt(dx*dx+dy*dy);
+      let dx=tx-e.x, dy=ty-e.y, d=Math.sqrt(dx*dx+dy*dy)||1;
       e.x+=dx/d*e.spd*1.5;
       e.y+=dy/d*e.spd*.8+e.vy*.3;
     } else if(e.pattern==='orbit'){
@@ -587,14 +584,11 @@ function update(){
       e.x=e.orbitCX+Math.cos(e.phase)*e.orbitR;
       e.y=e.orbitCY+Math.sin(e.phase)*e.orbitR*.5;
     } else if(e.pattern==='homing'){
-      let dx=player.x-e.x, dy=player.y-e.y, d=Math.sqrt(dx*dx+dy*dy);
+      let dx=player.x-e.x, dy=player.y-e.y, d=Math.sqrt(dx*dx+dy*dy)||1;
       e.vx+=(dx/d)*.15;e.vy+=(dy/d)*.15;
       let spd=Math.sqrt(e.vx*e.vx+e.vy*e.vy);
       if(spd>e.spd){e.vx*=e.spd/spd;e.vy*=e.spd/spd;}
       e.x+=e.vx;e.y+=e.vy;
-    } else if(e.pattern==='straight'&&e.bonus){
-      e.x+=e.vx;e.y+=e.vy;
-      if(e.x<e.size||e.x>W-e.size) e.vx*=-1;
     }
     // Shooting
     e.shootTimer++;
@@ -613,6 +607,7 @@ function update(){
       }
     }
   });
+  // Purge dead enemies after all updates this frame
   enemies=enemies.filter(e=>e.alive);
 
   // Boss update
@@ -620,30 +615,25 @@ function update(){
     boss.angle+=.015;
     boss.patternTimer++;
     boss.hitFlash=Math.max(0,boss.hitFlash-1);
-    // Move toward target
     boss.x+=(boss.tx-boss.x)*.018;
     boss.y+=(boss.ty-boss.y)*.018;
-    // Phase patterns
     if(boss.patternTimer%200===0){
       boss.patternPhase=(boss.patternPhase+1)%4;
       let targets=[[W*.3,H*.2],[W*.7,H*.2],[W*.5,H*.15],[W*.5,H*.25]];
       let t=targets[boss.patternPhase];
       boss.tx=t[0];boss.ty=t[1];
     }
-    // Boss shooting
     boss.shootTimer++;
     let bRate=boss.hp<boss.maxHp*.5?20:35;
     if(boss.shootTimer>=bRate){
       boss.shootTimer=0;
       bossShoot();
     }
-    // Phase 2 enrage
     if(boss.hp<boss.maxHp*.3 && boss.phase===1){
       boss.phase=2;
       announceStage('⚠ ENRAGE ⚠');
       screenShake=20;
     }
-    // Boss dead
     if(boss.hp<=0){
       spawnExplosion(boss.x,boss.y,boss.color,3);
       for(let i=0;i<3;i++) setTimeout(()=>spawnExplosion(boss.x+(Math.random()-.5)*80,boss.y+(Math.random()-.5)*60,boss.color,2),i*200);
@@ -652,12 +642,11 @@ function update(){
       bossActive=false;
       document.getElementById('bossBar').style.display='none';
       bossBullets=[];
+      hudDirty=true;
       setTimeout(()=>nextStage(),2000);
     }
-    // Update boss bar
     let pct=Math.max(0,boss.hp/boss.maxHp*100);
     document.getElementById('bossBarFill').style.width=pct+'%';
-    // Boss collision
     if(!player.dead && player.invincible<=0){
       if(rectCircle(player.x,player.y,player.w,player.h,boss.x,boss.y,boss.size+10)){
         playerHit(50);
@@ -712,7 +701,11 @@ function update(){
     if(alive===0){bonusActive=false;announceStage('BONUS END!');}
   }
 
-  if(frame%6===0) updateHUD();
+  // Throttled HUD update
+  if(hudDirty || frame%10===0){
+    hudDirty=false;
+    updateHUD();
+  }
 }
 
 function playerHit(dmg){
@@ -728,6 +721,7 @@ function playerHit(dmg){
     player.hp-=dmg;
     screenShake=Math.max(screenShake,10);
     player.invincible=45;
+    hudDirty=true;
     if(player.hp<=0){
       player.hp=0;
       playerDie();
@@ -736,12 +730,12 @@ function playerHit(dmg){
 }
 
 function playerDie(){
-  if(player.dead) return; // guard against re-entry
+  if(player.dead) return;
   player.dead=true;
-  player.invincible=999; // prevent any further hits during death
+  player.invincible=999;
   spawnExplosion(player.x,player.y,'#f80',2.5);
   lives--;
-  updateHUD();
+  hudDirty=true;
   if(lives<=0){
     setTimeout(()=>gameOver(),1500);
   } else {
@@ -751,6 +745,7 @@ function playerDie(){
       player.shield=player.maxShield;
       player.invincible=180;
       player.x=W/2;player.y=H*.75;
+      hudDirty=true;
     },1500);
   }
 }
@@ -760,19 +755,19 @@ function applyPickup(p){
   if(p.type==='shield') player.shield=Math.min(player.maxShield,player.shield+40);
   if(p.type==='charge') superCharge=Math.min(superMax,superCharge+25);
   if(p.type==='power') player.powerLevel=Math.min(3,player.powerLevel+1);
-  updateHUD();
+  hudDirty=true;
 }
 
 function nextStage(){
   stage++;wave=0;stageTimer=0;
   enemies=[];enemyBullets=[];bossBullets=[];
+  document.getElementById('stageNum').textContent=String(stage).padStart(2,'0');
   if(stage%3===0){
     spawnBonusStage();
   } else if(stage>6){
     gameWin();
   } else {
     announceStage('STAGE '+String(stage).padStart(2,'0'));
-    document.getElementById('stageNum').textContent=String(stage).padStart(2,'0');
     spawnWave();
   }
 }
@@ -781,7 +776,7 @@ function gameOver(){
   state='gameover';
   let ov=document.getElementById('overlay');
   ov.classList.remove('hidden');
-  ov.innerHTML=`<div class="overlay-title" style="color:#f53">GAME<br>OVER</div>
+  ov.innerHTML=`<div class="overlay-title" style="color:#f53;-webkit-text-fill-color:#f53">GAME<br>OVER</div>
   <div class="overlay-subtitle">最高连击 ${maxCombo}x</div>
   <div class="stat-value score-value" style="margin:20px 0">${String(score).padStart(8,'0')}</div>
   <button class="btn primary" onclick="startGame()">▶ 再战一局</button>
@@ -798,10 +793,13 @@ function gameWin(){
   <button class="btn primary" onclick="startGame()">▶ 再战一局</button>`;
 }
 
+let announceTimeout=null;
 function announceStage(txt){
   let el=document.getElementById('stageAnnounce');
-  el.textContent=txt;el.classList.add('show');
-  setTimeout(()=>el.classList.remove('show'),2000);
+  el.textContent=txt;
+  el.classList.add('show');
+  if(announceTimeout) clearTimeout(announceTimeout);
+  announceTimeout=setTimeout(()=>el.classList.remove('show'),2000);
 }
 
 // ===== HUD =====
@@ -810,11 +808,9 @@ function updateHUD(){
   document.getElementById('shieldBar').style.width=(player.shield/player.maxShield*100)+'%';
   document.getElementById('chargeBar').style.width=(superCharge/superMax*100)+'%';
   document.getElementById('scoreDisplay').textContent=String(score).padStart(8,'0');
-  // Lives
   let lv=document.getElementById('livesDisplay');
   lv.innerHTML='';
   for(let i=0;i<lives;i++) lv.innerHTML+='<span class="life-icon">✈</span>';
-  // Weapons
   let wh=document.getElementById('weaponHud');
   wh.innerHTML='';
   WEAPONS.forEach((w,i)=>{
@@ -830,7 +826,6 @@ function updateComboDisplay(){
   if(combo>=3){
     el.style.opacity='1';
     document.getElementById('comboNum').textContent=combo+'x';
-    if(combo>maxCombo) maxCombo=combo;
   } else {
     el.style.opacity='0';
   }
@@ -841,7 +836,6 @@ function draw(){
   ctx.save();
   ctx.translate(shakeX,shakeY);
 
-  // BG
   ctx.fillStyle='#000005';
   ctx.fillRect(-5,-5,W+10,H+10);
 
@@ -867,11 +861,10 @@ function draw(){
     }
   });
 
-  // Super effect overlay
+  // Super overlay
   if(superActive){
     ctx.fillStyle=`rgba(255,240,0,${Math.sin(frame*.3)*.04+.03})`;
     ctx.fillRect(0,0,W,H);
-    // Edge glow
     let eg=ctx.createRadialGradient(W/2,H/2,H*.3,W/2,H/2,H*.8);
     eg.addColorStop(0,'transparent');
     eg.addColorStop(1,'rgba(255,200,0,.15)');
@@ -883,17 +876,13 @@ function draw(){
   pickups.forEach(p=>{
     ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.angle);
     let sz=14;
-    // Glow
     ctx.shadowBlur=16;ctx.shadowColor=p.color;
     ctx.fillStyle=p.color;
-    // Diamond shape
     ctx.beginPath();ctx.moveTo(0,-sz);ctx.lineTo(sz,0);ctx.lineTo(0,sz);ctx.lineTo(-sz,0);ctx.closePath();ctx.fill();
     ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke();
-    // Inner
     ctx.fillStyle='rgba(255,255,255,.6)';
     ctx.beginPath();ctx.moveTo(0,-sz*.4);ctx.lineTo(sz*.4,0);ctx.lineTo(0,sz*.4);ctx.lineTo(-sz*.4,0);ctx.closePath();ctx.fill();
     ctx.restore();
-    // Pulsing ring
     ctx.strokeStyle=p.color;ctx.lineWidth=1;
     ctx.globalAlpha=(p.life%40)/40*.5;
     ctx.beginPath();ctx.arc(p.x,p.y,(1-(p.life%40)/40)*30,0,Math.PI*2);ctx.stroke();
@@ -961,7 +950,6 @@ function draw(){
   // Player bullets
   bullets.forEach(b=>{
     ctx.shadowBlur=12;ctx.shadowColor=b.color;
-    // Trail
     b.trail.forEach((t,i)=>{
       let a=(i/b.trail.length)*.5;
       ctx.globalAlpha=a;
@@ -994,7 +982,6 @@ function draw(){
     ctx.strokeStyle=flash?'#fff':e.color;
     ctx.fillStyle=flash?'rgba(255,255,255,.3)':e.color+'33';
     ctx.lineWidth=2;
-    // Draw different shapes per type
     if(e.type==='scout'){
       ctx.beginPath();ctx.moveTo(0,-e.size);ctx.lineTo(e.size*.7,e.size*.5);ctx.lineTo(-e.size*.7,e.size*.5);ctx.closePath();
       ctx.fill();ctx.stroke();
@@ -1020,7 +1007,6 @@ function draw(){
       ctx.font=`bold ${e.size}px serif`;ctx.textAlign='center';ctx.textBaseline='middle';
       ctx.fillText('★',0,2);
     }
-    // HP bar above enemy
     if(e.hp<e.maxHp){
       let pct=e.hp/e.maxHp;
       ctx.fillStyle='rgba(0,0,0,.5)';ctx.fillRect(-e.size,-e.size-8,e.size*2,5);
@@ -1035,16 +1021,13 @@ function draw(){
     ctx.save();ctx.translate(boss.x,boss.y);
     let flash=boss.hitFlash>0;
     ctx.shadowBlur=40;ctx.shadowColor=flash?'#fff':boss.color;
-    // Outer ring
     ctx.strokeStyle=boss.color;ctx.lineWidth=2;ctx.globalAlpha=.4;
     ctx.beginPath();ctx.arc(0,0,boss.size+20+Math.sin(frame*.05)*5,0,Math.PI*2);ctx.stroke();
     ctx.globalAlpha=1;
-    // Core
     ctx.rotate(boss.angle);
     ctx.strokeStyle=flash?'#fff':boss.color;
     ctx.fillStyle=flash?'rgba(255,255,255,.4)':boss.color+'44';
     ctx.lineWidth=3;
-    // Multi-layer shape
     for(let layer=0;layer<3;layer++){
       ctx.save();ctx.rotate(layer*Math.PI/6);
       let sz=boss.size-layer*15;
@@ -1059,12 +1042,10 @@ function draw(){
       ctx.stroke();
       ctx.restore();
     }
-    // Core circle
     let cg=ctx.createRadialGradient(0,0,0,0,0,boss.size*.35);
     cg.addColorStop(0,'#fff');cg.addColorStop(.5,boss.color);cg.addColorStop(1,'transparent');
     ctx.fillStyle=cg;
     ctx.beginPath();ctx.arc(0,0,boss.size*.35,0,Math.PI*2);ctx.fill();
-    // Enrage effect
     if(boss.phase===2){
       ctx.globalAlpha=Math.sin(frame*.1)*.3+.1;
       ctx.strokeStyle='#f00';ctx.lineWidth=4;
@@ -1089,10 +1070,8 @@ function draw(){
     });
     ctx.globalAlpha=1;ctx.shadowBlur=0;
 
-    // Invincible flash
     if(player.invincible>0 && Math.floor(frame/4)%2===0){ctx.restore();return;}
 
-    // Shield bubble
     if(player.shield>10){
       ctx.globalAlpha=player.shield/player.maxShield*.3;
       ctx.strokeStyle='#0af';ctx.lineWidth=2;
@@ -1101,7 +1080,6 @@ function draw(){
       ctx.globalAlpha=1;ctx.shadowBlur=0;
     }
 
-    // Super glow
     if(superActive){
       let sg=ctx.createRadialGradient(0,0,0,0,0,player.w*1.5);
       sg.addColorStop(0,'rgba(255,220,0,.4)');sg.addColorStop(1,'transparent');
@@ -1109,23 +1087,18 @@ function draw(){
       ctx.beginPath();ctx.arc(0,0,player.w*1.5,0,Math.PI*2);ctx.fill();
     }
 
-    // Jet flames
     let jc=WEAPONS[currentWeapon].color;
     let fw=6+(Math.sin(frame*.3))*2;
     ctx.shadowBlur=20;ctx.shadowColor=jc;
-    // Main flame
     let fg=ctx.createLinearGradient(0,player.h*.3,0,player.h*.3+30+fw*2);
     fg.addColorStop(0,jc);fg.addColorStop(.5,'#ff0');fg.addColorStop(1,'transparent');
     ctx.fillStyle=fg;
     ctx.beginPath();ctx.moveTo(-6,player.h*.3);ctx.lineTo(0,player.h*.3+30+fw*2);ctx.lineTo(6,player.h*.3);ctx.closePath();ctx.fill();
-    // Side flames
     ctx.beginPath();ctx.moveTo(-14,player.h*.25);ctx.lineTo(-12,player.h*.25+18+fw);ctx.lineTo(-8,player.h*.25);ctx.closePath();ctx.fill();
     ctx.beginPath();ctx.moveTo(14,player.h*.25);ctx.lineTo(12,player.h*.25+18+fw);ctx.lineTo(8,player.h*.25);ctx.closePath();ctx.fill();
     ctx.shadowBlur=0;
 
-    // Ship body
     ctx.shadowBlur=25;ctx.shadowColor='#0af';
-    // Main body gradient
     let bg2=ctx.createLinearGradient(0,-player.h/2,0,player.h/2);
     bg2.addColorStop(0,'#4af');bg2.addColorStop(.4,'#08f');bg2.addColorStop(1,'#026');
     ctx.fillStyle=bg2;
@@ -1141,18 +1114,15 @@ function draw(){
     ctx.closePath();
     ctx.fill();
     ctx.strokeStyle='#8df';ctx.lineWidth=1.5;ctx.stroke();
-    // Cockpit
     let cg2=ctx.createRadialGradient(0,-player.h*.15,0,0,-player.h*.15,player.w*.2);
     cg2.addColorStop(0,'rgba(150,220,255,.9)');cg2.addColorStop(1,'rgba(0,50,120,.6)');
     ctx.fillStyle=cg2;
     ctx.beginPath();ctx.ellipse(0,-player.h*.12,player.w*.15,player.h*.16,0,0,Math.PI*2);ctx.fill();
-    // Wings
     ctx.fillStyle='#056';
     ctx.beginPath();ctx.moveTo(player.w*.4,-player.h*.05);ctx.lineTo(player.w*.9,player.h*.1);ctx.lineTo(player.w*.3,player.h*.3);ctx.closePath();ctx.fill();
     ctx.beginPath();ctx.moveTo(-player.w*.4,-player.h*.05);ctx.lineTo(-player.w*.9,player.h*.1);ctx.lineTo(-player.w*.3,player.h*.3);ctx.closePath();ctx.fill();
     ctx.shadowBlur=0;
 
-    // Weapon indicator LEDs
     ctx.fillStyle=WEAPONS[currentWeapon].color;
     ctx.shadowBlur=8;ctx.shadowColor=WEAPONS[currentWeapon].color;
     ctx.beginPath();ctx.arc(0,player.h*.05,3,0,Math.PI*2);ctx.fill();
@@ -1161,7 +1131,7 @@ function draw(){
     ctx.restore();
   }
 
-  // Custom cursor crosshair
+  // Crosshair cursor
   ctx.save();
   ctx.strokeStyle='rgba(0,180,255,.8)';ctx.lineWidth=1.5;
   let cs=10;
